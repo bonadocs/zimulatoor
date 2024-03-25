@@ -1,11 +1,17 @@
 ﻿import { EVM } from '@ethereumjs/evm'
 import { RPCBlockChain, RPCStateManager } from '@ethereumjs/statemanager'
-import { Address } from '@ethereumjs/util'
+import {
+  Account,
+  Address,
+  bytesToHex,
+  fetchFromProvider,
+  toBytes,
+} from '@ethereumjs/util'
 import { VM } from '@ethereumjs/vm'
-import { getBytes, hexlify, JsonRpcProvider, ZeroHash } from 'ethers'
+import { keccak256, ZeroHash } from 'ethers'
 
 type CreateVMOptions = {
-  provider: JsonRpcProvider
+  providerUrl: string
   blockNumber: bigint
 }
 
@@ -20,12 +26,42 @@ class OverriddenStateManager extends RPCStateManager {
 
   async getAccount(address: Address) {
     const account = await super.getAccount(address)
-    if (account && hexlify(account.codeHash) === ZeroHash) {
-      account.codeHash = getBytes(KECCAK256_NULL)
+    if (account && bytesToHex(account.codeHash) === ZeroHash) {
+      account.codeHash = toBytes(KECCAK256_NULL)
       this._accountCache?.put(address, account)
       return account
     }
     return account
+  }
+
+  async getAccountFromProvider(address: Address): Promise<Account> {
+    try {
+      return await super.getAccountFromProvider(address)
+    } catch {
+      // provider does not support eth_getProof. Let's get the account data individually
+      // this won't work for contract accounts because we can't get the storage root
+      const [balance, nonce, code] = await Promise.all([
+        fetchFromProvider(this._provider, {
+          method: 'eth_getBalance',
+          params: [address.toString(), this._blockTag],
+        }),
+        fetchFromProvider(this._provider, {
+          method: 'eth_getTransactionCount',
+          params: [address.toString(), this._blockTag],
+        }),
+        fetchFromProvider(this._provider, {
+          method: 'eth_getCode',
+          params: [address.toString(), 'latest'], // code doesn't change so we can use latest
+        }),
+      ])
+      const codeHash = keccak256(code)
+      return Account.fromAccountData({
+        balance: BigInt(balance),
+        nonce: BigInt(nonce),
+        codeHash: toBytes(codeHash),
+        storageRoot: toBytes(KECCAK256_NULL),
+      })
+    }
   }
 
   async putContractCode(address: Address, value: Uint8Array): Promise<void> {
@@ -42,11 +78,10 @@ class OverriddenStateManager extends RPCStateManager {
 }
 
 export async function createVM(options: CreateVMOptions): Promise<VM> {
-  const providerUrl = options.provider._getConnection().url
-  const blockchain = new RPCBlockChain(providerUrl)
+  const blockchain = new RPCBlockChain(options.providerUrl)
 
   const stateManager = new OverriddenStateManager({
-    provider: providerUrl,
+    provider: options.providerUrl,
     blockTag: options.blockNumber,
   })
   const evm = new EVM({ blockchain, stateManager })
