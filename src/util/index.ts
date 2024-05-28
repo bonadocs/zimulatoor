@@ -1,5 +1,7 @@
-import { EvmError, ExecResult } from '@ethereumjs/evm'
+import { ExecResult } from '@ethereumjs/evm'
 import { AbiCoder, getBytes, hexlify } from 'ethers'
+
+import { EnhancedEvmError } from '../simulation/types'
 
 // this is mostly copied from ethers.js
 // <<==============================>>
@@ -21,7 +23,7 @@ export function addErrorMessage(result: ExecResult) {
     return
   }
 
-  const exceptionError: EvmError & { message?: string } = result.exceptionError
+  const exceptionError = result.exceptionError as EnhancedEvmError
 
   const data = result.returnValue
   let message = 'missing revert data'
@@ -62,5 +64,6 @@ export function addErrorMessage(result: ExecResult) {
   }
 
   exceptionError.message = message
+  exceptionError.data = data
   return exceptionError
 }

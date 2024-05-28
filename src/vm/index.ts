@@ -1,18 +1,25 @@
-﻿import { EVM } from '@ethereumjs/evm'
+﻿import { Block } from '@ethereumjs/block'
+import { Blockchain } from '@ethereumjs/blockchain'
+import { Common } from '@ethereumjs/common'
+import { EVM } from '@ethereumjs/evm'
 import { RPCBlockChain, RPCStateManager } from '@ethereumjs/statemanager'
 import {
   Account,
   Address,
   bytesToHex,
   fetchFromProvider,
+  hexToBytes,
   toBytes,
 } from '@ethereumjs/util'
 import { VM } from '@ethereumjs/vm'
-import { keccak256, ZeroHash } from 'ethers'
+import { JsonRpcProvider, keccak256, ZeroHash } from 'ethers'
+
+import { SignatureMatcher } from '../simulation/signature-matcher'
 
 type CreateVMOptions = {
-  providerUrl: string
   blockNumber: bigint
+  provider: JsonRpcProvider
+  signatureMatcher: SignatureMatcher
 }
 
 /**
@@ -78,15 +85,53 @@ class OverriddenStateManager extends RPCStateManager {
 }
 
 export async function createVM(options: CreateVMOptions): Promise<VM> {
-  const blockchain = new RPCBlockChain(options.providerUrl)
+  const providerUrl = options.provider._getConnection().url
+  const blockchain = new RPCBlockChain(providerUrl)
+
+  const network = await options.provider._detectNetwork()
+  const common = Common.custom(
+    {
+      chainId: network.chainId,
+      defaultHardfork: 'shanghai',
+    },
+    {
+      eips: [1559, 2930, 4895],
+      customCrypto: options.signatureMatcher.customCrypto,
+    },
+  )
 
   const stateManager = new OverriddenStateManager({
-    provider: options.providerUrl,
+    common,
+    provider: providerUrl,
     blockTag: options.blockNumber,
   })
-  const evm = new EVM({ blockchain, stateManager })
+
+  const forkBlock = await options.provider.getBlock(options.blockNumber, false)
+  if (!forkBlock?.hash) {
+    throw new Error(`Invalid fork block number: ${options.blockNumber}`)
+  }
+
+  const vmBlockchain = await Blockchain.create({
+    common,
+    validateBlocks: false,
+    validateConsensus: false,
+    genesisStateRoot: hexToBytes(forkBlock.stateRoot!),
+    genesisBlock: Block.fromBlockData({
+      header: {
+        timestamp: 0,
+        number: 0n,
+        difficulty: 1n,
+        gasLimit: BigInt(forkBlock.gasLimit),
+        gasUsed: forkBlock.gasUsed,
+      },
+    }),
+  })
+
+  const evm = await EVM.create({ blockchain, stateManager, common })
   return VM.create({
+    common,
     evm,
     stateManager,
+    blockchain: vmBlockchain,
   })
 }

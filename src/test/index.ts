@@ -3,15 +3,18 @@
 
 import {
   concat,
+  Contract,
   hexlify,
   JsonRpcProvider,
   parseUnits,
   randomBytes,
+  Signer,
   toBeHex,
   toBigInt,
   zeroPadValue,
 } from 'ethers'
 
+import { SimulationProvider } from '../ethers'
 import { networks } from '../networks'
 import { SimulationEngine } from '../simulation'
 
@@ -53,6 +56,77 @@ async function getBalance(
   }
 
   return toBigInt(response.execResult.returnValue)
+}
+
+async function testNetworkWithEthersProvider(
+  provider: SimulationProvider,
+  sender: string,
+  tokenAddress: string,
+) {
+  const receiver = hexlify(randomBytes(20))
+
+  const senderSigner = (await provider.getImpersonatedSigner(sender)) as Signer
+  const receiverSigner = (await provider.getImpersonatedSigner(
+    receiver,
+  )) as Signer
+
+  const erc20TransferAbi = [
+    'function transfer(address to, uint256 amount)',
+    'function balanceOf(address account) returns (uint256)',
+  ]
+  const contract = new Contract(tokenAddress, erc20TransferAbi, senderSigner)
+  const receiverContract = new Contract(
+    tokenAddress,
+    erc20TransferAbi,
+    receiverSigner,
+  )
+
+  const senderBalance = await contract.balanceOf(sender)
+  console.log({ senderBalance })
+
+  if (!senderBalance) {
+    throw new Error('Minted balance is zero')
+  }
+
+  const decimals = 6
+  // random amount between 100k and 1M tokens
+  const amount = parseUnits(
+    Math.floor(
+      Math.random() * Number(senderBalance / BigInt(Math.pow(10, decimals))),
+    ).toString(),
+    decimals,
+  )
+
+  if (amount > senderBalance) {
+    throw new Error('Amount is greater than minted balance')
+  }
+
+  // send {amount} tokens to receiver
+  const tx = await contract.transfer(receiver, amount)
+  await tx.wait()
+
+  // check sender balance
+  const balanceAfterTransfer = await contract.balanceOf(sender)
+  console.log({ balanceAfterTransfer })
+
+  const receiverAmount = amount / 2n
+
+  // send back 250k tokens to deployer
+  const returnTx = await receiverContract.transfer(sender, receiverAmount)
+  await returnTx.wait()
+
+  // check sender balance
+  const balanceAfterReturn = await receiverContract.balanceOf(receiver)
+  console.log({ balanceAfterReturn })
+
+  // compare both balances -> should add up to minted balance
+  const deployerBalance = await contract.balanceOf(sender)
+  const receiverBalance = await receiverContract.balanceOf(receiver)
+
+  console.log({ deployerBalance, receiverBalance })
+  if (deployerBalance + receiverBalance !== senderBalance) {
+    throw new Error('Balances do not add up to minted balance')
+  }
 }
 
 async function testNetwork(
@@ -182,17 +256,29 @@ async function testNetworkWithPublicToken(
 
 async function main() {
   const invalidNetworks = []
+  const ethereum = networks.find((n) => n.chainId === 1)!.url
+
+  const provider = new SimulationProvider(new JsonRpcProvider(ethereum))
+  const { address, token } = wealthyAddresses.get(1)!
+  await testNetworkWithEthersProvider(provider, address, token)
+
   for (const networkUrl of networks.map((n) => n.url)) {
-    const provider = new JsonRpcProvider(networkUrl, undefined, {
-      batchMaxCount: 1,
-    })
+    const provider = new SimulationProvider(
+      new JsonRpcProvider(networkUrl, undefined, {
+        batchMaxCount: 1,
+      }),
+    )
 
     const network = await provider._detectNetwork()
     const chainId = Number(network.chainId)
     if (wealthyAddresses.has(chainId)) {
       const { token, address } = wealthyAddresses.get(chainId)!
       try {
-        await testNetworkWithPublicToken(provider, token, address)
+        await testNetworkWithPublicToken(
+          provider.backingProvider,
+          token,
+          address,
+        )
       } catch (e) {
         console.error(e)
         invalidNetworks.push(networkUrl)
@@ -200,7 +286,7 @@ async function main() {
     }
 
     try {
-      await testNetworkSelfContained(provider)
+      await testNetworkSelfContained(provider.backingProvider)
     } catch (e) {
       console.error(e)
       invalidNetworks.push(networkUrl)
