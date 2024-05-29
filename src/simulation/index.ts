@@ -7,8 +7,9 @@ import {
 } from '@ethereumjs/tx'
 import { Address, bytesToHex, hexToBytes } from '@ethereumjs/util'
 import { RunTxResult, VM } from '@ethereumjs/vm'
-import { JsonRpcProvider, TransactionRequest } from 'ethers'
+import { JsonRpcProvider, randomBytes, TransactionRequest } from 'ethers'
 
+import { networks } from '../networks'
 import { initializeSimulationTransaction } from '../tx'
 import { addErrorMessage } from '../util'
 import { createVM } from '../vm'
@@ -61,7 +62,29 @@ export class SimulationEngine {
     return blockNumber - this.forkBlockNumber
   }
 
-  static async create(jsonRpcProvider: JsonRpcProvider, blockNumber?: bigint) {
+  static async create(
+    providerOrChainId: bigint | number | JsonRpcProvider,
+    blockNumber?: bigint,
+  ) {
+    let jsonRpcProvider: JsonRpcProvider
+    let chainId: bigint
+    if (
+      typeof providerOrChainId === 'bigint' ||
+      typeof providerOrChainId === 'number'
+    ) {
+      chainId = BigInt(providerOrChainId)
+
+      const network = networks.find((n) => n.chainId === Number(chainId))
+      if (!network) {
+        throw new Error(
+          `Network ${chainId} not currently supported for simulation`,
+        )
+      }
+      jsonRpcProvider = new JsonRpcProvider(network.url)
+    } else {
+      jsonRpcProvider = providerOrChainId
+      chainId = await jsonRpcProvider._detectNetwork().then((n) => n.chainId)
+    }
     blockNumber ??= BigInt(await jsonRpcProvider.getBlockNumber())
     const signatureMatcher = new SignatureMatcher()
     const vm = await createVM({
@@ -69,9 +92,6 @@ export class SimulationEngine {
       blockNumber,
       signatureMatcher: signatureMatcher,
     })
-    const chainId = await jsonRpcProvider
-      ._detectNetwork()
-      .then((n) => BigInt(n.chainId))
     return new SimulationEngine(
       jsonRpcProvider,
       vm,
@@ -291,7 +311,7 @@ export class SimulationEngine {
       try {
         hash = transactions[i].hash()
       } catch {
-        // ignore - hash is not available for unsigned transactions
+        hash = randomBytes(32).fill(0, 0, 12)
       }
 
       const enhancedTxResult = {

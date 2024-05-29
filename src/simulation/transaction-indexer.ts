@@ -17,8 +17,9 @@ export class TransactionIndexer {
     result: TxResult,
     blockNumber?: bigint,
   ) {
-    this.#transactions.set(bytesToHex(tx.hash()), tx)
-    this.#results.set(bytesToHex(tx.hash()), {
+    const hash = bytesToHex(result.hash)
+    this.#transactions.set(hash, tx)
+    this.#results.set(hash, {
       ...result,
       blockNumber,
     })

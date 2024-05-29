@@ -4,7 +4,7 @@ import { RunTxResult } from '@ethereumjs/vm'
 export type EnhancedEvmError = EvmError & { message?: string; data: Uint8Array }
 
 export type TxResult = RunTxResult & {
-  hash?: Uint8Array
+  hash: Uint8Array
   error?: EnhancedEvmError
   logs?: Array<{ address: string; topics: string[]; data: string }>
 }

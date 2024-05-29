@@ -28,14 +28,14 @@ import { SimulationEngine } from '../simulation'
 const fallbackToProviderConstantErrorCode = 32552225
 const blocklessSimulationBlockNumber = 6094306521n
 const blocklessSimulationBlockHash = sha256(
-  blocklessSimulationBlockNumber.toString(),
+  '0x' + blocklessSimulationBlockNumber.toString(16).padStart(16, '0'),
 )
 
 export async function executeJsonRpcFunction(
   engine: SimulationEngine,
   provider: JsonRpcApiProvider,
   payload: JsonRpcPayload,
-): Promise<(JsonRpcResult | JsonRpcError) & { jsonrpc: string }> {
+): Promise<(JsonRpcResult | JsonRpcError) & { jsonrpc?: string }> {
   const fn = registeredFunctions[payload.method as JsonRpcFunctionName]
   if (fn) {
     const result = await fn(engine, payload.params)
@@ -48,7 +48,8 @@ export async function executeJsonRpcFunction(
     }
   }
 
-  return provider.send(payload.method, payload.params)
+  const result = await provider._send(payload)
+  return result[0]
 }
 
 type JsonRpcParams = JsonRpcPayload['params']

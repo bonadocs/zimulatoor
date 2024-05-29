@@ -58,7 +58,7 @@ async function getBalance(
   return toBigInt(response.execResult.returnValue)
 }
 
-async function testNetworkWithEthersProvider(
+export async function testNetworkWithEthersProvider(
   provider: SimulationProvider,
   sender: string,
   tokenAddress: string,
@@ -256,11 +256,11 @@ async function testNetworkWithPublicToken(
 
 async function main() {
   const invalidNetworks = []
-  const ethereum = networks.find((n) => n.chainId === 1)!.url
 
+  /* const ethereum = networks.find((n) => n.chainId === 1)!.url
   const provider = new SimulationProvider(new JsonRpcProvider(ethereum))
   const { address, token } = wealthyAddresses.get(1)!
-  await testNetworkWithEthersProvider(provider, address, token)
+  await testNetworkWithEthersProvider(provider, address, token) */
 
   for (const networkUrl of networks.map((n) => n.url)) {
     const provider = new SimulationProvider(
