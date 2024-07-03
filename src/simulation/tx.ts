@@ -10,6 +10,7 @@ import {
 } from 'ethers'
 
 import { initializeSimulationTransaction } from '../tx'
+import { addErrorMessage } from '../util'
 
 import { SimulationError } from './error'
 import { SignatureMatcher } from './signature-matcher'
@@ -26,7 +27,7 @@ async function getAccountNonce(vm: VM, address: string) {
   return Number(account?.nonce ?? BigInt(0))
 }
 
-async function estimateGas(
+export async function estimateGas(
   vm: VM,
   tx: TransactionRequest,
   signatureMatcher: SignatureMatcher,
@@ -51,6 +52,10 @@ async function estimateGas(
       skipBlockGasLimitValidation: true,
       skipHardForkValidation: true,
     })
+    const error = addErrorMessage(result.execResult)
+    if (error) {
+      throw new SimulationError('Failed to estimate gas', error)
+    }
     return `0x${result.totalGasSpent.toString(16)}`
   } finally {
     await vm.stateManager.revert()

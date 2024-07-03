@@ -106,7 +106,18 @@ export async function createVM(options: CreateVMOptions): Promise<VM> {
     blockTag: options.blockNumber,
   })
 
-  const forkBlock = await options.provider.getBlock(options.blockNumber, false)
+  const fetchBlockTimeout = 15000 // 15 seconds
+  const startTime = Date.now()
+
+  let forkBlock: Awaited<ReturnType<JsonRpcProvider['getBlock']>>
+  do {
+    forkBlock = await options.provider.getBlock(options.blockNumber, false)
+    if (forkBlock?.hash) {
+      break
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500))
+  } while (Date.now() - startTime < fetchBlockTimeout)
+
   if (!forkBlock?.hash) {
     throw new Error(`Invalid fork block number: ${options.blockNumber}`)
   }

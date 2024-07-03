@@ -9,14 +9,14 @@ import { Address, bytesToHex, hexToBytes } from '@ethereumjs/util'
 import { RunTxResult, VM } from '@ethereumjs/vm'
 import { JsonRpcProvider, randomBytes, TransactionRequest } from 'ethers'
 
-import { networks } from '../networks'
+import { getMappedUrl } from '../networks'
 import { initializeSimulationTransaction } from '../tx'
 import { addErrorMessage } from '../util'
 import { createVM } from '../vm'
 
 import { SignatureMatcher } from './signature-matcher'
 import { TransactionIndexer } from './transaction-indexer'
-import { populateTransaction } from './tx'
+import { estimateGas, populateTransaction } from './tx'
 import { CallResult, TxResult } from './types'
 
 export class SimulationEngine {
@@ -42,7 +42,7 @@ export class SimulationEngine {
     this.chainId = chainId
     this.#transactionIndexer = new TransactionIndexer()
     this.#signatureMatcher = signatureMatcher
-    this.#blockNumber = forkBlockNumber
+    this.#blockNumber = 0n
     this.#lastTimestamp = Date.now()
   }
 
@@ -73,14 +73,7 @@ export class SimulationEngine {
       typeof providerOrChainId === 'number'
     ) {
       chainId = BigInt(providerOrChainId)
-
-      const network = networks.find((n) => n.chainId === Number(chainId))
-      if (!network) {
-        throw new Error(
-          `Network ${chainId} not currently supported for simulation`,
-        )
-      }
-      jsonRpcProvider = new JsonRpcProvider(network.url)
+      jsonRpcProvider = new JsonRpcProvider(getMappedUrl(Number(chainId)))
     } else {
       jsonRpcProvider = providerOrChainId
       chainId = await jsonRpcProvider._detectNetwork().then((n) => n.chainId)
@@ -143,6 +136,40 @@ export class SimulationEngine {
     return this.#transactionIndexer.getResult(hash)
   }
 
+  async estimateGas(tx: TransactionRequest): Promise<string> {
+    return await estimateGas(this.vm, tx, this.#signatureMatcher)
+  }
+
+  async call(tx: {
+    from: string
+    to: string
+    data: string
+    value?: string
+  }): Promise<CallResult> {
+    if (!tx.to) {
+      throw new Error("'to' address is required")
+    }
+
+    try {
+      await this.vm.stateManager.checkpoint()
+      const evmResult = (await this.vm.evm.runCall({
+        caller: Address.fromString(tx.from),
+        to: Address.fromString(tx.to),
+        data: hexToBytes(tx.data),
+        value: tx.value ? BigInt(tx.value) : BigInt(0),
+        isStatic: true,
+      })) as RunTxResult
+
+      addErrorMessage(evmResult.execResult)
+      return {
+        ...evmResult,
+        error: evmResult.execResult.exceptionError,
+      } as CallResult
+    } finally {
+      await this.vm.stateManager.revert()
+    }
+  }
+
   async execute(tx: TransactionRequest): Promise<TxResult> {
     const transaction = await this.#prepareTransaction(tx)
     const results = await this.#executeTransactions([transaction])
@@ -179,7 +206,7 @@ export class SimulationEngine {
             from: tx.from as string,
             gasPrice: undefined,
             maxFeePerGas: populated.maxFeePerGas!,
-            gasLimit: populated.gas,
+            gasLimit: 10_000_000, // populated.gas,
           },
           {
             common: this.vm.common,
@@ -193,7 +220,7 @@ export class SimulationEngine {
           {
             ...populated,
             from: tx.from as string,
-            gasLimit: populated.gas,
+            gasLimit: 10_000_000, // populated.gas,
           },
           {
             common: this.vm.common,
@@ -207,7 +234,7 @@ export class SimulationEngine {
           {
             ...populated,
             from: tx.from as string,
-            gasLimit: populated.gas,
+            gasLimit: 10_000_000, // populated.gas,
           },
           {
             common: this.vm.common,
@@ -218,22 +245,33 @@ export class SimulationEngine {
     return typedTx
   }
 
-  #executeTransactions(transactions: TypedTransaction[]) {
-    const hasUnsignedTransactions = transactions.some(
-      (tx) => tx.v == null || tx.r == null || tx.s == null,
-    )
+  async #executeTransactions(transactions: TypedTransaction[]) {
+    let hasError = true
+    try {
+      await this.vm.stateManager.checkpoint()
 
-    return hasUnsignedTransactions
-      ? this.#executeTransactionsWithoutBlock(transactions)
-      : this.#executeTransactionsInBlock(transactions)
+      const hasUnsignedTransactions = transactions.some(
+        (tx) => tx.v == null || tx.r == null || tx.s == null,
+      )
+
+      const results = hasUnsignedTransactions
+        ? await this.#executeTransactionsWithoutBlock(transactions)
+        : await this.#executeTransactionsInBlock(transactions)
+
+      hasError = results.some((result) => result.error)
+      return results
+    } finally {
+      if (hasError) {
+        await this.vm.stateManager.revert()
+      } else {
+        await this.vm.stateManager.commit()
+      }
+    }
   }
 
   async #executeTransactionsInBlock(transactions: TypedTransaction[]) {
     const lastBlock = await this.vm.blockchain.getCanonicalHeadBlock()
-    if (
-      !lastBlock.header.number &&
-      this.#blockNumber !== this.forkBlockNumber
-    ) {
+    if (!lastBlock.header.number && this.#blockNumber !== 0n) {
       throw new Error('Failed to get last block')
     }
 
@@ -252,7 +290,7 @@ export class SimulationEngine {
     const block = Block.fromBlockData(
       {
         header: {
-          number: this.#blockNumber - this.forkBlockNumber,
+          number: this.#blockNumber,
           parentHash: lastBlock.hash(),
           timestamp: this.#lastTimestamp,
           gasLimit,
@@ -283,6 +321,9 @@ export class SimulationEngine {
         await this.vm.runTx({
           tx,
           skipBalance: true,
+          skipNonce: true,
+          skipBlockGasLimitValidation: true,
+          skipHardForkValidation: true,
         }),
       )
     }
@@ -330,27 +371,5 @@ export class SimulationEngine {
     }
 
     return executionResults
-  }
-
-  async call(tx: {
-    from: string
-    to: string
-    data: string
-    value?: string
-  }): Promise<CallResult> {
-    if (!tx.to) {
-      throw new Error("'to' address is required")
-    }
-
-    const evmResult = await this.vm.evm.runCall({
-      caller: Address.fromString(tx.from),
-      to: Address.fromString(tx.to),
-      data: hexToBytes(tx.data),
-      value: tx.value ? BigInt(tx.value) : BigInt(0),
-      isStatic: true,
-    })
-
-    addErrorMessage(evmResult.execResult)
-    return { ...evmResult }
   }
 }

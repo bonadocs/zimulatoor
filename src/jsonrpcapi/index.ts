@@ -24,12 +24,17 @@ import {
 } from 'ethers'
 
 import { SimulationEngine } from '../simulation'
+import { SimulationError } from '../simulation/error'
 
 const fallbackToProviderConstantErrorCode = 32552225
-const blocklessSimulationBlockNumber = 6094306521n
-const blocklessSimulationBlockHash = sha256(
-  '0x' + blocklessSimulationBlockNumber.toString(16).padStart(16, '0'),
-)
+let blocklessSimulationBlockNumber = 6094306521n
+const blocklessSimulationBlockHash = () =>
+  sha256('0x' + blocklessSimulationBlockNumber.toString(16).padStart(16, '0'))
+const blocklessTxSignature = {
+  r: '0x48b93be5de05792b1afdbb2fec32e7e0c4ec42755ea471a150350128e52088fb',
+  s: '0x22c9dd7842357291d5d14a46c317ca411e1faa3129ebdf69d9ec28bb7ce4b742',
+  v: '0x1',
+}
 
 export async function executeJsonRpcFunction(
   engine: SimulationEngine,
@@ -39,11 +44,12 @@ export async function executeJsonRpcFunction(
   const fn = registeredFunctions[payload.method as JsonRpcFunctionName]
   if (fn) {
     const result = await fn(engine, payload.params)
-    if (result.code !== fallbackToProviderConstantErrorCode) {
+    const isFallBack = result.code === fallbackToProviderConstantErrorCode
+    if (!isFallBack) {
       return {
         id: payload.id,
         jsonrpc: payload.jsonrpc,
-        result,
+        ...(typeof result.code === 'number' ? { error: result } : { result }),
       }
     }
   }
@@ -100,10 +106,9 @@ const registeredFunctions: Record<
   JsonRpcFunctionName,
   SimulationJsonRpcFunction
 > = {
-  async eth_blockNumber(
-    engine: SimulationEngine,
-  ): Promise<JsonRpcResultData | JsonRpcErrorData> {
-    return bigIntToHex(engine.blockNumber)
+  async eth_blockNumber() // engine: SimulationEngine,
+  : Promise<JsonRpcResultData | JsonRpcErrorData> {
+    return bigIntToHex(blocklessSimulationBlockNumber) // bigIntToHex(engine.blockNumber) // todo: return correct block number once the forked EVM implementation is ready
   },
   async eth_call(
     engine: SimulationEngine,
@@ -129,16 +134,13 @@ const registeredFunctions: Record<
     params: JsonRpcParams,
   ): Promise<JsonRpcResultData | JsonRpcErrorData> {
     try {
-      const callResult = await getCallResult(engine, params)
-      if (callResult.error) {
-        return {
-          code: -32000,
-          message: callResult.error.message,
-          data: bytesToHex(callResult.error.data),
-        }
+      const callParams = params as [CallPayload]
+      if (!callParams[0]?.from) {
+        throw new Error(
+          'JSON_RPC_API_INVALID_PARAMS- Invalid params. "from" field is required',
+        )
       }
-
-      return bigIntToHex(callResult.execResult.executionGasUsed)
+      return await engine.estimateGas(callPayloadToTxRequest(callParams[0]))
     } catch (error) {
       return genericExceptionHandler(error)
     }
@@ -558,16 +560,20 @@ const registeredFunctions: Record<
       const block = result.blockNumber
         ? await engine.vm.blockchain.getBlock(result.blockNumber)
         : undefined
+
+      if (!block) {
+        blocklessSimulationBlockNumber++
+      }
       const blockHash = block
         ? bytesToHex(block.hash())
-        : blocklessSimulationBlockHash
+        : blocklessSimulationBlockHash()
       const blockNumber = result.blockNumber
         ? bigIntToHex(engine.resolveBlockNumber(result.blockNumber))
         : bigIntToHex(blocklessSimulationBlockNumber)
 
-      const transactionHash = bytesToHex(tx.hash())
+      const transactionHash = bytesToHex(result.hash)
       const transactionIndex = !block
-        ? 0
+        ? '0x0'
         : '0x' +
           block.transactions
             .findIndex(
@@ -695,7 +701,13 @@ const registeredFunctions: Record<
       const block = result.blockNumber
         ? await engine.vm.blockchain.getBlock(result.blockNumber)
         : undefined
-      return evmTransactionToJsonRpcTransaction(block, tx, 0, engine.chainId)
+      return evmTransactionToJsonRpcTransaction(
+        block,
+        tx,
+        0,
+        engine.chainId,
+        result.hash,
+      )
     } catch (error) {
       return genericExceptionHandler(error)
     }
@@ -745,7 +757,7 @@ const registeredFunctions: Record<
         }
       }
 
-      return bytesToHex(result.execResult.returnValue)
+      return bytesToHex(result.hash)
     } catch (error) {
       return genericExceptionHandler(error)
     }
@@ -761,8 +773,9 @@ const registeredFunctions: Record<
 type CallPayload = {
   from: string
   to: string
-  input: string
   value?: string
+  input?: string
+  data?: string
 }
 function getCallResult(engine: SimulationEngine, params: JsonRpcParams) {
   const callParams = params as [CallPayload]
@@ -776,6 +789,13 @@ function getCallResult(engine: SimulationEngine, params: JsonRpcParams) {
 }
 
 function genericExceptionHandler(error: unknown) {
+  if (error instanceof SimulationError && error.data) {
+    return {
+      code: -32000,
+      message: `${error.message} - ${error.data.message}`,
+      data: bytesToHex(error.data.data),
+    }
+  }
   if (!(error instanceof Error) || !error.message.startsWith('JSON_RPC_API')) {
     throw error
   }
@@ -813,7 +833,7 @@ function evmBlockToJsonRpcBlock(
     transactions: block.transactions.map((tx, i) =>
       includeTxData
         ? evmTransactionToJsonRpcTransaction(block, tx, i, chainId)
-        : tx.hash,
+        : tx.hash(),
     ),
     transactionsRoot: bytesToHex(block.header.transactionsTrie),
     uncles: block.uncleHeaders.map((u) => u.hash()),
@@ -825,20 +845,35 @@ function evmTransactionToJsonRpcTransaction(
   tx: TypedTransaction,
   i: number,
   chainId: bigint,
+  hash: Uint8Array = tx.hash(),
 ) {
-  return {
+  if (!block) {
+    blocklessSimulationBlockNumber++
+  }
+  const result = {
     ...tx.toJSON(),
-    blockHash: block ? block.hash() : blocklessSimulationBlockHash,
-    blockNumber: block ? block.header.number : blocklessSimulationBlockNumber,
+    blockHash: block
+      ? bytesToHex(block.hash())
+      : blocklessSimulationBlockHash(),
+    blockNumber: bigIntToHex(
+      block ? block.header.number : blocklessSimulationBlockNumber,
+    ),
     from: tx.getSenderAddress().toString(),
-    gas: tx.gasLimit,
+    gas: bigIntToHex(tx.gasLimit),
     gasLimit: undefined,
-    hash: bytesToHex(tx.hash()),
-    input: tx.data,
+    hash: bytesToHex(hash),
+    input: bytesToHex(tx.data),
     data: undefined,
-    transactionIndex: '0x' + i.toString(16),
+    transactionIndex: bigIntToHex(BigInt(i)),
     chainId: bigIntToHex(chainId),
   }
+
+  if (!result.v && !result.r && !result.s) {
+    Object.assign(result, blocklessTxSignature)
+  }
+  delete result.gasLimit
+  delete result.data
+  return result
 }
 
 function callPayloadToTxRequest(call: CallPayload): {
@@ -850,7 +885,7 @@ function callPayloadToTxRequest(call: CallPayload): {
   return {
     from: call.from,
     to: call.to,
-    data: call.input || '0x',
+    data: call.input || call.data || '0x',
     value: call.value || '0x0',
   }
 }

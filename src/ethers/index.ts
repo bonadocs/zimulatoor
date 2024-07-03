@@ -10,6 +10,7 @@
 } from 'ethers'
 
 import { executeJsonRpcFunction } from '../jsonrpcapi'
+import { getMappedUrl } from '../networks'
 import { SimulationEngine } from '../simulation'
 
 export class SimulationProvider extends JsonRpcApiProvider {
@@ -18,10 +19,16 @@ export class SimulationProvider extends JsonRpcApiProvider {
   #engine?: SimulationEngine
 
   constructor(
-    provider: JsonRpcProvider,
+    providerOrChainId: JsonRpcProvider | number,
     blockTag: 'latest' | bigint = 'latest',
   ) {
     super()
+    let provider: JsonRpcProvider
+    if (typeof providerOrChainId === 'number') {
+      provider = new JsonRpcProvider(getMappedUrl(providerOrChainId))
+    } else {
+      provider = providerOrChainId
+    }
     this.#provider = provider
     this.#blockTag = blockTag
   }
