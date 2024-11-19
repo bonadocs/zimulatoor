@@ -87,8 +87,6 @@ patchFetch()
 const networks = new Map<number, string[]>(
   [
     { chainId: 42161, urls: ['https://rpc.ankr.com/arbitrum/2d47556778fa48b20e04d625debf0e0697c4be973dbe56a16c4e0626b953d482'] },
-    { chainId: 42161, urls: ['https://rpc.ankr.com/arbitrum/2d47556778fa48b20e04d625debf0e0697c4be973dbe56a16c4e0626b953d482'] },
-    { chainId: 42161, urls: ['https://rpc.ankr.com/arbitrum/2d47556778fa48b20e04d625debf0e0697c4be973dbe56a16c4e0626b953d482'] },
     { chainId: 421614, urls: ['https://rpc.ankr.com/arbitrum_sepolia/2d47556778fa48b20e04d625debf0e0697c4be973dbe56a16c4e0626b953d482'] },
     { chainId: 42170, urls: ['https://rpc.ankr.com/arbitrumnova/2d47556778fa48b20e04d625debf0e0697c4be973dbe56a16c4e0626b953d482'] },
     { chainId: 43114, urls: ['https://rpc.ankr.com/avalanche/2d47556778fa48b20e04d625debf0e0697c4be973dbe56a16c4e0626b953d482'] },
