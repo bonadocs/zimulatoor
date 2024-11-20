@@ -37,7 +37,7 @@ function resolveMappedUrls(url: string) {
 }
 
 function patchFetch() {
-  if (typeof self?.fetch === 'function') {
+  if (typeof self !== 'undefined' && typeof self?.fetch === 'function') {
     const originalFetch = self.fetch
 
     self.fetch = async function fetch(
@@ -105,7 +105,6 @@ const networks = new Map<number, string[]>(
     { chainId: 42220, urls: ['https://rpc.ankr.com/celo'] },
     { chainId: 88888, urls: ['https://rpc.ankr.com/chiliz'] },
     { chainId: 1116, urls: ['https://rpc.ankr.com/core'] },
-    { chainId: 1, urls: ['https://rpc.ankr.com/eth'] },
     { chainId: 17000, urls: ['https://rpc.ankr.com/eth_holesky'] },
     { chainId: 11155111, urls: ['https://rpc.ankr.com/eth_sepolia'] },
     { chainId: 250, urls: ['https://rpc.ankr.com/fantom'] },

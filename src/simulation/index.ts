@@ -7,17 +7,29 @@ import {
 } from '@ethereumjs/tx'
 import { Address, bytesToHex, hexToBytes } from '@ethereumjs/util'
 import { RunTxResult, VM } from '@ethereumjs/vm'
-import { JsonRpcProvider, randomBytes, TransactionRequest } from 'ethers'
+import {
+  copyRequest,
+  isAddress,
+  JsonRpcProvider,
+  randomBytes,
+  TransactionRequest,
+  Wallet,
+} from 'ethers'
 
 import { getMappedUrl } from '../networks'
 import { initializeSimulationTransaction } from '../tx'
 import { addErrorMessage } from '../util'
 import { createVM } from '../vm'
 
+import { SimulationError } from './error'
 import { SignatureMatcher } from './signature-matcher'
 import { TransactionIndexer } from './transaction-indexer'
-import { estimateGas, populateTransaction } from './tx'
 import { CallResult, TxResult } from './types'
+
+async function getAccountNonce(vm: VM, address: string) {
+  const account = await vm.stateManager.getAccount(Address.fromString(address))
+  return Number(account?.nonce ?? BigInt(0))
+}
 
 export class SimulationEngine {
   readonly #jsonRpcProvider: JsonRpcProvider
@@ -28,6 +40,7 @@ export class SimulationEngine {
   readonly chainId: bigint
   #blockNumber: bigint
   #lastTimestamp: number
+  readonly #highGasLimit = '0x2540be400' as const
 
   private constructor(
     jsonRpcProvider: JsonRpcProvider,
@@ -137,7 +150,7 @@ export class SimulationEngine {
   }
 
   async estimateGas(tx: TransactionRequest): Promise<string> {
-    return await estimateGas(this.vm, tx, this.#signatureMatcher)
+    return await this.#estimateGas(tx)
   }
 
   async call(tx: {
@@ -189,12 +202,7 @@ export class SimulationEngine {
   }
 
   async #prepareTransaction(tx: TransactionRequest) {
-    const populated = await populateTransaction({
-      vm: this.vm,
-      provider: this.#jsonRpcProvider,
-      tx,
-      signatureMatcher: this.#signatureMatcher,
-    })
+    const populated = await this.#populateTransaction(tx)
 
     let typedTx: TypedTransaction
     switch (populated.type) {
@@ -276,7 +284,7 @@ export class SimulationEngine {
     }
 
     this.#blockNumber++
-    this.#lastTimestamp++
+    this.#lastTimestamp = Date.now()
 
     const totalGasLimit = transactions.reduce(
       (gasLimit, tx) => gasLimit + tx.gasLimit,
@@ -315,8 +323,25 @@ export class SimulationEngine {
   }
 
   async #executeTransactionsWithoutBlock(transactions: TypedTransaction[]) {
+    const lastBlock = await this.vm.blockchain.getCanonicalHeadBlock()
+    if (!lastBlock.header.number && this.#blockNumber !== 0n) {
+      throw new Error('Failed to get last block')
+    }
+
     const runTxResults = []
     for (const tx of transactions) {
+      const block = Block.fromBlockData(
+        {
+          header: {
+            number: this.#blockNumber,
+            parentHash: lastBlock.hash(),
+            timestamp: this.#lastTimestamp,
+            gasLimit: tx.gasLimit,
+          },
+        },
+        { common: this.vm.common },
+      )
+
       runTxResults.push(
         await this.vm.runTx({
           tx,
@@ -324,6 +349,7 @@ export class SimulationEngine {
           skipNonce: true,
           skipBlockGasLimitValidation: true,
           skipHardForkValidation: true,
+          block,
         }),
       )
     }
@@ -371,5 +397,96 @@ export class SimulationEngine {
     }
 
     return executionResults
+  }
+
+  async #estimateGas(tx: TransactionRequest) {
+    const vm = this.vm
+    const lastBlock = await this.vm.blockchain.getCanonicalHeadBlock()
+    if (!lastBlock.header.number && this.#blockNumber !== 0n) {
+      throw new Error('Failed to get last block')
+    }
+
+    try {
+      this.#blockNumber++
+      this.#lastTimestamp++
+      await vm.stateManager.checkpoint()
+      const block = Block.fromBlockData(
+        {
+          header: {
+            number: this.#blockNumber,
+            parentHash: lastBlock.hash(),
+            timestamp: this.#lastTimestamp,
+            gasLimit: this.#highGasLimit,
+          },
+        },
+        { common: this.vm.common },
+      )
+
+      const result = await vm.runTx({
+        tx: initializeSimulationTransaction(
+          FeeMarketEIP1559Transaction,
+          {
+            from: tx.from as string,
+            to: tx.to as string,
+            data: tx.data as string,
+            gasLimit: 10_000_000,
+            maxFeePerGas: 10,
+          },
+          {},
+          this.#signatureMatcher,
+        ),
+        skipBalance: true,
+        skipNonce: true,
+        skipBlockGasLimitValidation: true,
+        skipHardForkValidation: true,
+        block,
+      })
+      const error = addErrorMessage(result.execResult)
+      if (error) {
+        throw new SimulationError('Failed to estimate gas', error)
+      }
+      return `0x${result.totalGasSpent.toString(16)}`
+    } finally {
+      this.#blockNumber--
+      this.#lastTimestamp--
+      await vm.stateManager.revert()
+    }
+  }
+
+  async #populateTransaction(tx: TransactionRequest) {
+    tx = copyRequest(tx)
+    if (!isAddress(tx.from)) {
+      throw new SimulationError('Invalid from address')
+    }
+
+    const vm = this.vm
+    const provider = this.#jsonRpcProvider
+    const from = tx.from
+    tx.nonce = await getAccountNonce(vm, from)
+
+    // cache gas limit to bypass the provider's estimateGas
+    const gasLimit = tx.gasLimit
+    tx.gasLimit = 1
+
+    // Hack from address to populate the transaction
+    const dummyWalletForPopulate = new Wallet(
+      '0x0101010101010101010101010101010101010101010101010101010101010101',
+      provider,
+    )
+    tx.from = dummyWalletForPopulate.address
+    const rpcTx = provider.getRpcTransaction(
+      await dummyWalletForPopulate.populateTransaction(tx),
+    )
+    rpcTx.from = tx.from = from
+
+    rpcTx.gas = gasLimit?.toString()
+
+    // estimate gas if not provided. skip if it's a contract creation
+    if (rpcTx.gas == null && rpcTx.to) {
+      rpcTx.gas = await this.#estimateGas(tx)
+    } else if (!rpcTx.to) {
+      rpcTx.gas = '0x2540be400'
+    }
+    return rpcTx
   }
 }
