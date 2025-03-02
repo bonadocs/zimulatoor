@@ -15,7 +15,7 @@ import {
 } from 'ethers'
 
 import { SimulationProvider } from '../ethers'
-import { getMappedUrl, iterateNetworks } from '../networks'
+import { getMappedUrl, networks } from '../networks'
 import { SimulationEngine } from '../simulation'
 
 const bytecode =
@@ -58,11 +58,11 @@ async function getBalance(
   return toBigInt(response.execResult.returnValue)
 }
 
-export async function testNetworkWithEthersProvider(
-  provider: SimulationProvider,
-  sender: string,
-  tokenAddress: string,
-) {
+export async function testNetworkWithEthersProvider() {
+  const ethereum = getMappedUrl(1)
+  const provider = new SimulationProvider(new JsonRpcProvider(ethereum))
+  const { address: sender, token: tokenAddress } = wealthyAddresses.get(1)!
+
   const receiver = hexlify(randomBytes(20))
 
   const senderSigner = (await provider.getImpersonatedSigner(sender)) as Signer
@@ -128,6 +128,7 @@ export async function testNetworkWithEthersProvider(
   if (deployerBalance + receiverBalance !== senderBalance) {
     throw new Error('Balances do not add up to minted balance')
   }
+  exit()
 }
 
 async function testNetwork(
@@ -217,6 +218,7 @@ async function testNetwork(
 
 async function testNetworkSelfContained(provider: JsonRpcProvider) {
   const network = await provider._detectNetwork()
+  const start = Date.now()
   console.log('Testing network (self-contained):', network.chainId)
 
   const deployer = hexlify(randomBytes(20))
@@ -239,7 +241,8 @@ async function testNetworkSelfContained(provider: JsonRpcProvider) {
 
   const tokenAddress = deploymentResult.createdAddress.toString()
   await testNetwork(engine, deployer, tokenAddress)
-  console.log('Done testing network:', network.chainId)
+  const end = Date.now()
+  console.log('Done testing network:', network.chainId, 'in', end - start, 'ms')
 }
 
 async function testNetworkWithPublicToken(
@@ -249,21 +252,24 @@ async function testNetworkWithPublicToken(
 ) {
   const network = await provider._detectNetwork()
   console.log('Testing network (public token):', network.chainId)
+  const start = Date.now()
 
   const engine = await SimulationEngine.create(provider)
   await testNetwork(engine, wealthyAddress, tokenAddress)
-  console.log('Done testing network:', network.chainId)
+  const end = Date.now()
+  console.log('Done testing network:', network.chainId, 'in', end - start, 'ms')
+}
+
+function exit() {
+  process.exit()
 }
 
 export async function main() {
   const invalidNetworks = []
 
-  const ethereum = getMappedUrl(1)
-  const provider = new SimulationProvider(new JsonRpcProvider(ethereum))
-  const { address, token } = wealthyAddresses.get(1)!
-  await testNetworkWithEthersProvider(provider, address, token)
+  await testNetworkWithEthersProvider()
 
-  for (const { chainId: c } of iterateNetworks()) {
+  for (const c of networks.keys()) {
     const provider = new SimulationProvider(
       new JsonRpcProvider(getMappedUrl(c), undefined, {
         batchMaxCount: 1,
@@ -296,5 +302,25 @@ export async function main() {
 
   console.log('Invalid networks:', invalidNetworks)
 }
+
+process.on('unhandledRejection', (e) => {
+  console.error(e)
+  process.exit(1)
+})
+
+process.on('uncaughtException', (e) => {
+  console.error(e)
+  process.exit(1)
+})
+
+process.on('SIGINT', () => {
+  console.log('SIGINT received. Exiting')
+  process.exit()
+})
+
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received. Exiting')
+  process.exit()
+})
 
 main().catch((e) => console.error(e))
