@@ -341,10 +341,7 @@ export class UnifiedStorage extends BaseStorage {
     dbName: string,
     storeName: string,
   ): Promise<StorageAPI> {
-    if (
-      typeof window !== 'undefined' &&
-      typeof window?.indexedDB === 'object'
-    ) {
+    if (typeof self !== 'undefined' && typeof self?.indexedDB === 'object') {
       const { IndexedDBStorage } = await import('./IndexedDBStorage')
       return new IndexedDBStorage(dbName, storeName)
     }
