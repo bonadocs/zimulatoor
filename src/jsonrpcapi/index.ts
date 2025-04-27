@@ -12,7 +12,7 @@ import {
   bigIntToHex,
   bytesToHex,
   hexToBytes,
-  isHexPrefixed,
+  isHexString,
 } from '@ethereumjs/util'
 import {
   isAddress,
@@ -183,7 +183,7 @@ const registeredFunctions: Record<
   ): Promise<JsonRpcResultData | JsonRpcErrorData> {
     try {
       const [blockHashParam, includeTxData] = params as [string, boolean]
-      if (!isHexPrefixed(blockHashParam)) {
+      if (!isHexString(blockHashParam)) {
         return {
           code: -32602,
           message:
@@ -224,7 +224,7 @@ const registeredFunctions: Record<
       }
 
       if (
-        !isHexPrefixed(blockNumberParam) &&
+        !isHexString(blockNumberParam) &&
         !['latest', 'pending', 'safe', 'finalized'].includes(blockNumberParam)
       ) {
         return {
@@ -234,7 +234,7 @@ const registeredFunctions: Record<
         }
       }
 
-      const blockNumber = isHexPrefixed(blockNumberParam)
+      const blockNumber = isHexString(blockNumberParam)
         ? BigInt(blockNumberParam)
         : engine.blockNumber
 
@@ -262,7 +262,7 @@ const registeredFunctions: Record<
   ): Promise<JsonRpcResultData | JsonRpcErrorData> {
     try {
       const [blockHashParam] = params as [string]
-      if (!isHexPrefixed(blockHashParam)) {
+      if (!isHexString(blockHashParam)) {
         return {
           code: -32602,
           message:
@@ -303,7 +303,7 @@ const registeredFunctions: Record<
       }
 
       if (
-        !isHexPrefixed(blockNumberParam) &&
+        !isHexString(blockNumberParam) &&
         !['latest', 'pending', 'safe', 'finalized'].includes(blockNumberParam)
       ) {
         return {
@@ -313,7 +313,7 @@ const registeredFunctions: Record<
         }
       }
 
-      const blockNumber = isHexPrefixed(blockNumberParam)
+      const blockNumber = isHexString(blockNumberParam)
         ? BigInt(blockNumberParam)
         : engine.blockNumber
 
@@ -390,7 +390,7 @@ const registeredFunctions: Record<
         }
       }
 
-      if (!isHexPrefixed(positionParam)) {
+      if (!isHexString(positionParam)) {
         return {
           code: -32602,
           message:
@@ -399,7 +399,7 @@ const registeredFunctions: Record<
       }
 
       if (
-        !isHexPrefixed(blockNumberParam) &&
+        !isHexString(blockNumberParam) &&
         !['latest', 'pending', 'safe', 'finalized'].includes(blockNumberParam)
       ) {
         return {
@@ -427,7 +427,7 @@ const registeredFunctions: Record<
   ): Promise<JsonRpcResultData | JsonRpcErrorData> {
     try {
       const [blockHashParam, indexParam] = params as [string, string]
-      if (!isHexPrefixed(blockHashParam)) {
+      if (!isHexString(blockHashParam)) {
         return {
           code: -32602,
           message:
@@ -435,7 +435,7 @@ const registeredFunctions: Record<
         }
       }
 
-      if (!isHexPrefixed(indexParam)) {
+      if (!isHexString(indexParam)) {
         return {
           code: -32602,
           message:
@@ -487,7 +487,7 @@ const registeredFunctions: Record<
       }
 
       if (
-        !isHexPrefixed(blockNumberParam) &&
+        !isHexString(blockNumberParam) &&
         !['latest', 'pending', 'safe', 'finalized'].includes(blockNumberParam)
       ) {
         return {
@@ -497,7 +497,7 @@ const registeredFunctions: Record<
         }
       }
 
-      if (!isHexPrefixed(indexParam)) {
+      if (!isHexString(indexParam)) {
         return {
           code: -32602,
           message:
@@ -505,7 +505,7 @@ const registeredFunctions: Record<
         }
       }
 
-      const blockNumber = isHexPrefixed(blockNumberParam)
+      const blockNumber = isHexString(blockNumberParam)
         ? BigInt(blockNumberParam)
         : engine.blockNumber
 
@@ -541,7 +541,7 @@ const registeredFunctions: Record<
   ): Promise<JsonRpcResultData | JsonRpcErrorData> {
     try {
       const [txHashParam] = params as [string]
-      if (!isHexPrefixed(txHashParam)) {
+      if (!isHexString(txHashParam)) {
         return {
           code: -32602,
           message:
@@ -631,7 +631,7 @@ const registeredFunctions: Record<
     try {
       const [signedTransaction] = params as [string]
 
-      if (!isHexPrefixed(signedTransaction)) {
+      if (!isHexString(signedTransaction)) {
         return {
           code: -32602,
           message:
@@ -673,7 +673,7 @@ const registeredFunctions: Record<
   ): Promise<JsonRpcResultData | JsonRpcErrorData> {
     try {
       const [txHashParam] = params as [unknown]
-      if (typeof txHashParam === 'string' && !isHexPrefixed(txHashParam)) {
+      if (typeof txHashParam === 'string' && !isHexString(txHashParam)) {
         return {
           code: -32602,
           message:

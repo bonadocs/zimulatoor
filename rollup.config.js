@@ -1,4 +1,4 @@
-﻿import { defineConfig } from 'rollup';
+﻿import { defineConfig } from 'rollup'
 import typescript from '@rollup/plugin-typescript'
 import resolve from '@rollup/plugin-node-resolve'
 import replace from '@rollup/plugin-replace'
@@ -12,25 +12,25 @@ const config = defineConfig({
     {
       file: 'build/bundle.esm.mjs',
       format: 'esm',
+      inlineDynamicImports: true,
     },
     {
       file: 'build/bundle.umd.js',
       format: 'umd',
       name: 'zimulatoor',
+      inlineDynamicImports: true,
       globals: {
-        'ethers': 'ethers'
-      }
-    }
+        ethers: 'ethers',
+      },
+    },
   ],
-  external: [
-    'react',
-    'react-dom',
-    'ethers'
-  ],
+  external: ['ethers'],
   plugins: [
     replace({
       values: {
-        'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV || 'production'),
+        'process.env.NODE_ENV': JSON.stringify(
+          process.env.NODE_ENV || 'production',
+        ),
       },
       preventAssignment: true,
     }),
@@ -40,8 +40,8 @@ const config = defineConfig({
       outputToFilesystem: true,
       compilerOptions: {
         declaration: true,
-        declarationDir: "./build"
-      }
+        declarationDir: './build',
+      },
     }),
     resolve({
       browser: true,
@@ -49,10 +49,8 @@ const config = defineConfig({
       preferBuiltins: false,
     }),
     commonjs(),
-    terser()
-  ]
+    terser(),
+  ],
 })
 
-export default [
-  config,
-]
+export default [config]
