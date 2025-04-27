@@ -1,8 +1,9 @@
 {
   "name": "@bonadocs/zimulatoor",
-  "version": "1.0.0-dev.28",
+  "version": "1.0.0-dev.30",
   "description": "A forked network implementation designed to run in the browser for simulations",
-  "main": "build/bundle.mjs",
+  "main": "build/bundle.umd.js",
+  "module": "build/bundle.esm.mjs",
   "typings": "build/index.d.ts",
   "repository": "https://github.com/bonadocs/zimulatoor.git",
   "keywords": [],
@@ -81,8 +82,7 @@
     "typescript": "^5.3.3"
   },
   "files": [
-    "build/main",
-    "build/module",
+    "build",
     "!**/*.spec.*",
     "!**/*.json",
     "CHANGELOG.md",
