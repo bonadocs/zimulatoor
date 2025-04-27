@@ -2,6 +2,7 @@ import { ExecResult } from '@ethereumjs/evm'
 import { AbiCoder, getBytes, hexlify } from 'ethers'
 
 import { EnhancedEvmError } from '../simulation/types'
+import { getZimulatoorTagCache } from '../storage'
 
 // this is mostly copied from ethers.js
 // <<==============================>>
@@ -66,4 +67,64 @@ export function addErrorMessage(result: ExecResult) {
   exceptionError.message = message
   exceptionError.data = data
   return exceptionError
+}
+
+export async function getCachedBlockNumber(
+  chainId: bigint,
+): Promise<bigint | 'latest'> {
+  const key = getCacheKey(chainId)
+  const storage = await getZimulatoorTagCache()
+
+  try {
+    const data = await storage.getString(key)
+    if (!data) {
+      return 'latest'
+    }
+
+    const cachedBlockTag = JSON.parse(data)
+    if (cachedBlockTag.expireAt && cachedBlockTag.expireAt < Date.now()) {
+      return 'latest'
+    }
+
+    if (cachedBlockTag.blockTag) {
+      return BigInt(cachedBlockTag.blockTag)
+    }
+
+    return 'latest'
+  } catch (e) {
+    return 'latest'
+  }
+}
+
+export async function cacheBlockNumber(
+  chainId: bigint,
+  blockTag: bigint,
+  expireAt?: number,
+) {
+  const key = getCacheKey(chainId)
+  const storage = await getZimulatoorTagCache()
+
+  let cachedTag = JSON.parse((await storage.getString(key)) || '{}')
+  if (!cachedTag) {
+    cachedTag = {}
+  }
+
+  cachedTag.blockTag = blockTag.toString()
+  if (expireAt) {
+    cachedTag.expireAt = expireAt
+  } else {
+    delete cachedTag.expireAt
+  }
+
+  await storage.set(key, JSON.stringify(cachedTag))
+}
+
+export async function deleteCachedBlockNumber(chainId: bigint): Promise<void> {
+  const key = getCacheKey(chainId)
+  const storage = await getZimulatoorTagCache()
+  await storage.remove(key)
+}
+
+function getCacheKey(chainId: bigint) {
+  return `block-tag-${chainId}`
 }

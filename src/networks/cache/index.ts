@@ -1,25 +1,27 @@
+import { getZimulatoorTagCache } from '../../storage'
+
 const cacheMap = new Map<string, cacheMapEntry>()
+const persistentCachePromise = getZimulatoorTagCache()
 
 type cacheMapEntry = {
   value: string
   expiry: number
 }
 
-function set(key: string, value: string, ttl: number): void {
+async function set(key: string, value: string, ttl: number): Promise<void> {
   const entry: cacheMapEntry = {
     value,
     expiry: Date.now() + ttl * 1000,
   }
   cacheMap.set(key, entry)
 
-  if (typeof localStorage === 'undefined' || !localStorage) {
-    return
-  }
-
-  localStorage.setItem(key, JSON.stringify(entry))
+  const persistentCache = await persistentCachePromise
+  persistentCache.set(key, JSON.stringify(entry)).catch((e) => {
+    console.error('failed to read from api cache', e)
+  })
 }
 
-function get(key: string): string | null {
+async function get(key: string): Promise<string | null> {
   try {
     const entry = cacheMap.get(key)
     const now = Date.now()
@@ -28,11 +30,8 @@ function get(key: string): string | null {
       return entry.value
     }
 
-    if (typeof localStorage === 'undefined' || !localStorage) {
-      return null
-    }
-
-    const stored = localStorage.getItem(key)
+    const persistentCache = await persistentCachePromise
+    const stored = await persistentCache.getString(key)
     if (!stored) {
       return null
     }

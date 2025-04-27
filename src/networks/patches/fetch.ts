@@ -35,9 +35,9 @@ export function patchFetch() {
       url = input.toString()
     }
 
-    const { key: cacheKey, body } = getFetchCacheKey(input, init) || {}
+    const { key: cacheKey, body } = (await getFetchCacheKey(input, init)) || {}
     if (cacheKey) {
-      const response = cache.get(cacheKey)
+      const response = await cache.get(cacheKey)
       if (response) {
         const parsed = JSON.parse(response)
         return new Response(
@@ -92,7 +92,7 @@ async function cacheResponse(
   const body = await clone.text()
 
   // cache the response for 5 minutes
-  cache.set(cacheKey, JSON.stringify({ ...response, body }), 300)
+  await cache.set(cacheKey, JSON.stringify({ ...response, body }), 300)
 
   return response
 }

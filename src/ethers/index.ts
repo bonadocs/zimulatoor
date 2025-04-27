@@ -12,15 +12,18 @@
 import { executeJsonRpcFunction } from '../jsonrpcapi'
 import { getMappedUrl } from '../networks'
 import { SimulationEngine } from '../simulation'
+import { getCachedBlockNumber } from '../util'
+
+type PromiseOrValue<T> = Promise<T> | T
 
 export class SimulationProvider extends JsonRpcApiProvider {
   readonly #provider: JsonRpcProvider
-  readonly #blockTag: 'latest' | bigint
+  readonly #blockTag: PromiseOrValue<'latest' | bigint>
   #engine?: SimulationEngine
 
   constructor(
     providerOrChainId: JsonRpcProvider | number,
-    blockTag: 'latest' | bigint = 'latest',
+    blockTag?: 'latest' | bigint,
   ) {
     super()
     let provider: JsonRpcProvider
@@ -30,7 +33,9 @@ export class SimulationProvider extends JsonRpcApiProvider {
       provider = providerOrChainId
     }
     this.#provider = provider
-    this.#blockTag = blockTag
+    this.#blockTag =
+      blockTag ??
+      provider.getNetwork().then((n) => getCachedBlockNumber(n.chainId))
   }
 
   get backingProvider() {
@@ -38,21 +43,16 @@ export class SimulationProvider extends JsonRpcApiProvider {
   }
 
   /**
-   * When a public key is provided, the provider can be used to sign transactions
-   * that get executed in a block. This is useful for testing contracts that
-   * require a signature from a specific address. On the other hand, when an
-   * address is provided, the provider simulates the transactions without
-   * signing them.
+   * When a public key is provided, the provider can be used to sign
+   * transactions that get executed in a block. This is useful for testing
+   * contracts that require a signature from a specific address. On the other
+   * hand, when an address is provided, the provider simulates the transactions
+   * without signing them.
    *
    * @param publicKeyOrAddress
    */
   async getImpersonatedSigner(publicKeyOrAddress: string) {
-    const blockNumber =
-      typeof this.#blockTag === 'bigint' ? this.#blockTag : undefined
-
-    if (!this.#engine) {
-      this.#engine = await SimulationEngine.create(this.#provider, blockNumber)
-    }
+    await this.ensureEngine()
 
     if (!isAddress(publicKeyOrAddress)) {
       const privateKey = this.#engine!.impersonateAccount(publicKeyOrAddress)
@@ -63,13 +63,7 @@ export class SimulationProvider extends JsonRpcApiProvider {
   }
 
   async _start(): Promise<void> {
-    if (this.#engine) {
-      return super._start()
-    }
-
-    const blockNumber =
-      typeof this.#blockTag === 'bigint' ? this.#blockTag : undefined
-    this.#engine = await SimulationEngine.create(this.#provider, blockNumber)
+    await this.ensureEngine()
     return super._start()
   }
 
@@ -94,5 +88,13 @@ export class SimulationProvider extends JsonRpcApiProvider {
       )
     }
     return results
+  }
+
+  private async ensureEngine() {
+    if (!this.#engine) {
+      const blockTag = await this.#blockTag
+      const blockNumber = typeof blockTag === 'bigint' ? blockTag : undefined
+      this.#engine = await SimulationEngine.create(this.#provider, blockNumber)
+    }
   }
 }

@@ -35,10 +35,10 @@ export function resolveMappedUrls(url: string) {
   return urls
 }
 
-export function getFetchCacheKey(
+export async function getFetchCacheKey(
   input: RequestInfo | URL,
   init?: RequestInit,
-): { key: string; body: EvmCallData } | null {
+): Promise<{ key: string; body: EvmCallData } | null> {
   const parts = getRequestParts(input, init)
   if (
     parts.body &&
@@ -56,10 +56,7 @@ export function getFetchCacheKey(
   }
 
   const plainKey = JSON.stringify(keyParts)
-  const encodedKey =
-    typeof Buffer === 'undefined'
-      ? btoa(plainKey)
-      : Buffer.from(plainKey).toString('base64')
+  const encodedKey = await digestMessage(plainKey)
   return { key: encodedKey, body: parts.fullBody }
 }
 
@@ -154,4 +151,11 @@ function tryParseEvmCall(body: string): EvmCallData | null {
   } catch {
     return null
   }
+}
+
+async function digestMessage(message: string) {
+  const msgUint8 = new TextEncoder().encode(message)
+  const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8)
+  const hashArray = Array.from(new Uint8Array(hashBuffer))
+  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('')
 }
