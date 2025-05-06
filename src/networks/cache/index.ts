@@ -1,7 +1,7 @@
-import { getZimulatoorTagCache } from '../../storage'
+import { getApiCache } from '../../storage'
 
 const cacheMap = new Map<string, cacheMapEntry>()
-const persistentCachePromise = getZimulatoorTagCache()
+const persistentCachePromise = getApiCache()
 
 type cacheMapEntry = {
   value: string

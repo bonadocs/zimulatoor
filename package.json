@@ -1,6 +1,6 @@
 {
   "name": "@bonadocs/zimulatoor",
-  "version": "1.0.0-dev.30",
+  "version": "1.0.0-dev.31",
   "description": "A forked network implementation designed to run in the browser for simulations",
   "main": "build/bundle.umd.js",
   "module": "build/bundle.esm.mjs",

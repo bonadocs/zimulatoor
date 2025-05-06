@@ -71,28 +71,28 @@ export function addErrorMessage(result: ExecResult) {
 
 export async function getCachedBlockNumber(
   chainId: bigint,
-): Promise<bigint | 'latest'> {
+): Promise<bigint | null> {
   const key = getCacheKey(chainId)
   const storage = await getZimulatoorTagCache()
 
   try {
     const data = await storage.getString(key)
     if (!data) {
-      return 'latest'
+      return null
     }
 
     const cachedBlockTag = JSON.parse(data)
     if (cachedBlockTag.expireAt && cachedBlockTag.expireAt < Date.now()) {
-      return 'latest'
+      return null
     }
 
     if (cachedBlockTag.blockTag) {
       return BigInt(cachedBlockTag.blockTag)
     }
 
-    return 'latest'
+    return null
   } catch (e) {
-    return 'latest'
+    return null
   }
 }
 

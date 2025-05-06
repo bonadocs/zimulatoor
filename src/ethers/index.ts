@@ -33,9 +33,7 @@ export class SimulationProvider extends JsonRpcApiProvider {
       provider = providerOrChainId
     }
     this.#provider = provider
-    this.#blockTag =
-      blockTag ??
-      provider.getNetwork().then((n) => getCachedBlockNumber(n.chainId))
+    this.#blockTag = this.getSimulationBlockTag(blockTag)
   }
 
   get backingProvider() {
@@ -96,5 +94,19 @@ export class SimulationProvider extends JsonRpcApiProvider {
       const blockNumber = typeof blockTag === 'bigint' ? blockTag : undefined
       this.#engine = await SimulationEngine.create(this.#provider, blockNumber)
     }
+  }
+
+  private async getSimulationBlockTag(blockTag?: 'latest' | bigint) {
+    if (blockTag) {
+      return blockTag
+    }
+
+    const network = await this.#provider.getNetwork()
+    const cachedBlockNumber = await getCachedBlockNumber(network.chainId)
+    if (!cachedBlockNumber) {
+      return 'latest'
+    }
+
+    return cachedBlockNumber
   }
 }
